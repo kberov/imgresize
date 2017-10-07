@@ -1,0 +1,13 @@
+imgresize - A naive script for resizing images in a directory in depth
+
+Currently imgresize can be invoked with parameter `-dir`
+and it will traverse it in depth, search for files with
+extension jpg or jpeg and create their resized copies
+with max with 800 and max height 700 pixels.
+
+TODO
+
+* Add additional parameters for the required max with and height;
+* Support PNG and GIF images;
+* Do not process files if they are already processed.
+
