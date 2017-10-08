@@ -3,18 +3,21 @@ package main
 /* Copyright 2017 Красимир Беров  */
 
 /*
-imgresize - A naive script for resizing images in a directory in depth
+Command imgresize - A naive script for resizing images in a directory in depth
 
-Currently imgresize can be invoked with parameter `-dir`
-and it will traverse it in depth, search for files with
-extension jpg or jpeg and create their resized copies
-with max with 800 and max height 700 pixels.
+Currently supports only `jp(e)?g` files.
 
-TODO
+Usage of imgresize:
+  -dir string
+    	root folder to search for images (default "./")
+  -maxheight uint
+    	maximal height of the resized image (default 800)
+  -maxwidth uint
+    	maximal width of the resized image (default 800)
 
-* Add additional parameters for the required max with and height;
+TODO:
+
 * Support PNG and GIF images;
-* Do not process files if they are already processed.
 
 */
 
@@ -31,20 +34,38 @@ import (
 	"sync"
 )
 
+var (
+	maxwidth  *uint64
+	maxheight *uint64
+)
 var rejpg = regexp.MustCompile(`(?i)^(.+)\.jp(e)?g$`)
+var reresized = regexp.MustCompile(`(?i)\d+x\d+\.(jp(e)?g|png|gif)$`)
 
 func main() {
 	dir := flag.String("dir", "./", "root folder to search for images")
+	maxwidth = flag.Uint64("maxwidth", 800, "maximal width of the resized image")
+	maxheight = flag.Uint64("maxheight", 800, "maximal height of the resized image")
 	flag.Parse()
 	Println("Looking into folder:", *dir)
-	FindFile(*dir, ProcessFile)
+	FindFiles(*dir, ProcessFile)
 }
 
 // ProcessFile resizes a particular file in its own goroutine
-func ProcessFile(dir string, f os.FileInfo, wg sync.WaitGroup) {
+func ProcessFile(dir string, f os.FileInfo, wg *sync.WaitGroup) {
+	defer wg.Done()
 	path := filepath.Join(dir, f.Name())
+	matches := rejpg.FindStringSubmatch(path)
+	newFileName := matches[1] + Sprintf(`-%dx%d.jpg`, *maxwidth, *maxheight)
 	if !rejpg.MatchString(path) {
-		Println("Skipping ", path, "not a JPEG file")
+		Println("Skipping ", path, "not a JPEG, PNG nor GIF file")
+		return
+	}
+	if reresized.MatchString(path) {
+		Println("Skipping ", path, "This is a result of resizement.")
+		return
+	}
+	if _, err := os.Stat(newFileName); err == nil {
+		Println("Skipping", path, "It is already resized as", newFileName)
 		return
 	}
 	Println("resizing", path)
@@ -59,20 +80,15 @@ func ProcessFile(dir string, f os.FileInfo, wg sync.WaitGroup) {
 		log.Println(err)
 		return
 	}
-	// Resize the image to max width 800 px and max height 700px
-	// keeping the aspect ratio.
-	img = resize.Resize(800, 0, img, resize.Lanczos3)
-	img = resize.Resize(0, 700, img, resize.Lanczos3)
+	// Resize the image to max width pixels and max height pixels keeping the aspect ratio.
+	img = resize.Thumbnail(uint(*maxwidth), uint(*maxheight), img, resize.Lanczos3)
 	// Create a copy and save it
-	matches := rejpg.FindStringSubmatch(path)
-	newFileName := matches[1] + "-800x700.jpg"
 	fileOut, err := os.Create(newFileName)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 	defer fileOut.Close()
-	defer wg.Done()
 	Println("Creating", newFileName)
 	//Write the new image to the newly created file
 	jpeg.Encode(fileOut, img, nil)
@@ -80,7 +96,7 @@ func ProcessFile(dir string, f os.FileInfo, wg sync.WaitGroup) {
 
 // FindFiles finds files in `dir` and processes them using `wanted`
 func FindFiles(dir string,
-	wanted func(dir string, f os.FileInfo, wg sync.WaitGroup)) {
+	wanted func(dir string, f os.FileInfo, wg *sync.WaitGroup)) {
 	// https://stackoverflow.com/questions/18207772/#18207832
 	var wg = new(sync.WaitGroup)
 	files, err := ioutil.ReadDir(dir)
