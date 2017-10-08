@@ -104,14 +104,27 @@ func FindFiles(dir string,
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	var folders []string
+	added := 0
 	for _, f := range files {
+		if f.IsDir() {
+			folders = append(folders, filepath.Join(dir, f.Name()))
+			continue
+		}
 		wg.Add(1)
 		go wanted(dir, f, wg)
-		if f.IsDir() {
-			FindFiles(filepath.Join(dir, f.Name()), wanted)
+		added++
+		if added == 10 { //wait for ten files to be processed, then continue.
+			wg.Wait()
+			added = 0
 		}
 	}
-	wg.Wait()
+	if added > 0 { //wait for the remaining less than ten files to be processed
+		wg.Wait()
+	}
 
+	//process folders in this folder
+	for _, f := range folders {
+		FindFiles(f, wanted)
+	}
 }
