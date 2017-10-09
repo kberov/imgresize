@@ -1,13 +1,17 @@
-imgresize - A naive script for resizing images in a directory in depth
+Command imgresize - A naive program for resizing images in a tree of directories
 
-Currently imgresize can be invoked with parameter `-dir`
-and it will traverse it in depth, search for files with
-extension jpg or jpeg and create their resized copies
-with max with 800 and max height 700 pixels.
+Each file is processed in its own goroutine, which means imgresize should be very fast.
+Currently supported file formats are JPEG, GIF and PNG.
 
-TODO
+Usage of imgresize:
+  -dir string
+    	root folder to search for images (default "./")
+  -maxheight uint
+    	maximal height of the resized image (default 800)
+  -maxwidth uint
+    	maximal width of the resized image (default 800)
 
-* Add additional parameters for the required max with and height;
-* Support PNG and GIF images;
-* Do not process files if they are already processed.
+This program depends on github.com/nfnt/resize
+
+/* Copyright 2017 Красимир Беров  */
 

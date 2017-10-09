@@ -3,9 +3,10 @@ package main
 /* Copyright 2017 Красимир Беров  */
 
 /*
-Command imgresize - A naive script for resizing images in a directory in depth
+Command imgresize - A naive program for resizing images in a tree of directories
 
-Currently supports only `jp(e)?g` files.
+Each file is processed in its own goroutine, which means imgresize should be very fast.
+Currently supported file formats are JPEG, GIF and PNG.
 
 Usage of imgresize:
   -dir string
@@ -15,9 +16,7 @@ Usage of imgresize:
   -maxwidth uint
     	maximal width of the resized image (default 800)
 
-TODO:
-
-* Support PNG and GIF images;
+This program depends on github.com/nfnt/resize
 
 */
 
@@ -25,7 +24,10 @@ import (
 	"flag"
 	. "fmt"
 	"github.com/nfnt/resize"
+	"image"
+	"image/gif"
 	"image/jpeg"
+	"image/png"
 	"io/ioutil"
 	"log"
 	"os"
@@ -38,8 +40,9 @@ var (
 	maxwidth  *uint64
 	maxheight *uint64
 )
-var rejpg = regexp.MustCompile(`(?i)^(.+)\.jp(e)?g$`)
-var reresized = regexp.MustCompile(`(?i)\d+x\d+\.(jp(e)?g|png|gif)$`)
+var extension = `(jp(e)?g|png|gif)$`
+var rejpg = regexp.MustCompile(`(?i)^(.+)?\.` + extension)
+var reresized = regexp.MustCompile(`(?i)\d+x\d+\.` + extension)
 
 func main() {
 	dir := flag.String("dir", "./", "root folder to search for images")
@@ -54,20 +57,21 @@ func main() {
 func ProcessFile(dir string, f os.FileInfo, wg *sync.WaitGroup) {
 	defer wg.Done()
 	path := filepath.Join(dir, f.Name())
-	matches := rejpg.FindStringSubmatch(path)
-	newFileName := matches[1] + Sprintf(`-%dx%d.jpg`, *maxwidth, *maxheight)
 	if !rejpg.MatchString(path) {
-		Println("Skipping ", path, "not a JPEG, PNG nor GIF file")
+		Println("Skipping", path, "not a JPEG, PNG nor GIF file")
 		return
 	}
 	if reresized.MatchString(path) {
-		Println("Skipping ", path, "This is a result of resizement.")
+		Println("Skipping", path, "This is a result of resizing.")
 		return
 	}
+	matches := rejpg.FindStringSubmatch(path)
+	newFileName := matches[1] + Sprintf(`-%dx%d.`+matches[2], *maxwidth, *maxheight)
 	if _, err := os.Stat(newFileName); err == nil {
 		Println("Skipping", path, "It is already resized as", newFileName)
 		return
 	}
+
 	Println("resizing", path)
 	fileIn, err := os.Open(path)
 	if err != nil {
@@ -75,7 +79,18 @@ func ProcessFile(dir string, f os.FileInfo, wg *sync.WaitGroup) {
 		return
 	}
 	defer fileIn.Close()
-	img, err := jpeg.Decode(fileIn)
+
+	var img image.Image
+	if ok, _ := regexp.MatchString("(?i)jp(e)?g$", path); ok {
+		Println("decoding", path)
+		img, err = jpeg.Decode(fileIn)
+	} else if ok, _ := regexp.MatchString("(?i)png$", path); ok {
+		Println("decoding", path)
+		img, err = png.Decode(fileIn)
+	} else if ok, _ := regexp.MatchString("(?i)gif$", path); ok {
+		Println("decoding", path)
+		img, err = gif.Decode(fileIn)
+	}
 	if err != nil {
 		log.Println(err)
 		return
@@ -91,12 +106,20 @@ func ProcessFile(dir string, f os.FileInfo, wg *sync.WaitGroup) {
 	defer fileOut.Close()
 	Println("Creating", newFileName)
 	//Write the new image to the newly created file
-	jpeg.Encode(fileOut, img, nil)
+	if ok, _ := regexp.MatchString("(?i)jp(e)?g$", newFileName); ok {
+		err = jpeg.Encode(fileOut, img, nil)
+	} else if ok, _ := regexp.MatchString("(?i)png$", newFileName); ok {
+		err = png.Encode(fileOut, img)
+	} else if ok, _ := regexp.MatchString("(?i)gif$", newFileName); ok {
+		err = gif.Encode(fileOut, img, nil)
+	}
+	if err != nil {
+		log.Println(err)
+	}
 }
 
 // FindFiles finds files in `dir` and processes them using `wanted`
-func FindFiles(dir string,
-	wanted func(dir string, f os.FileInfo, wg *sync.WaitGroup)) {
+func FindFiles(dir string, wanted func(dir string, f os.FileInfo, wg *sync.WaitGroup)) {
 	// https://stackoverflow.com/questions/18207772/#18207832
 	var wg = new(sync.WaitGroup)
 	files, err := ioutil.ReadDir(dir)
@@ -105,24 +128,15 @@ func FindFiles(dir string,
 		log.Fatal(err)
 	}
 	var folders []string
-	added := 0
-	for _, f := range files {
-		if f.IsDir() {
-			folders = append(folders, filepath.Join(dir, f.Name()))
+	for _, file := range files {
+		if file.IsDir() {
+			folders = append(folders, filepath.Join(dir, file.Name()))
 			continue
 		}
 		wg.Add(1)
-		go wanted(dir, f, wg)
-		added++
-		if added == 10 { //wait for ten files to be processed, then continue.
-			wg.Wait()
-			added = 0
-		}
+		go wanted(dir, file, wg)
 	}
-	if added > 0 { //wait for the remaining less than ten files to be processed
-		wg.Wait()
-	}
-
+	wg.Wait()
 	//process folders in this folder
 	for _, f := range folders {
 		FindFiles(f, wanted)
